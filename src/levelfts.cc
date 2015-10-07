@@ -8,37 +8,62 @@ gcc -Wall -o levelfts -std=c++11 -lstdc++ -lleveldb levelfts.cc; exit
 #include <sysexits.h>
 #include <leveldb/db.h>
 
+namespace LvFTS {
+
 #define PROGRAM_NAME "levelfts"
 
 void abort_with_usage() {
-  std::cerr << "Usage: " PROGRAM_NAME " index <textpath> <indexpath>" << std::endl;
+  std::cerr << "Usage: " PROGRAM_NAME " index <docpath> <> <indexpath>" << std::endl;
   std::cerr << "       " PROGRAM_NAME " search <keyword> <indexpath>" << std::endl;
   exit(EX_USAGE);
 }
 
-int create_ii(const char *textpath, const char *iipath) {
-  leveldb::DB *ii = nullptr;
+class Tokenizer {
+public:
+  Tokenizer(std::ifstream stream)
+  : stream_(stream), writing_options_(), token_(), position_(0) {
+	  memset(token_, 0, sizeof(token_));
+  }
+  virtual ~Tokenizer() {
+  }
+
+  bool Tokenize(const char **token, int &position) {
+    if (!stream_.good()) {
+      return false;
+    }
+    token_[1] = stream_.get();
+    if (!stream_.good()) {
+      token_[1] = (char)-1;
+    }
+    token_[0] = token_[1];
+    ++position_;
+	*token = token_;
+    position = position_;
+    return true;
+  }
+
+private:
+  std::ifstream stream_;
+  char token_[3];
+  int position_;
+};
+
+} /* namespace LvFTS */
+
+bool add_index_with_db(const char *textpath, const char *indexdbpath, Error &error) {
+  leveldb::DB *indexdb = nullptr;
   leveldb::Options opening_options;
   opening_options.create_if_missing = true;
-  leveldb::Status status = leveldb::DB::Open(opening_options, iipath, &ii);
+  leveldb::Status status = leveldb::DB::Open(opening_options, indexdbpath, &indexdb);
   assert(status.ok());
 
   std::ifstream textfile(textpath);
-  char token[3] = {(char)-1, 0};
-  char position = 0;
+  LvFTS::Tokenizer tokenizer(textfile);
+  const char *token = nullptr;
+  int position = 0;
   leveldb::WriteOptions writing_options;
-  while (true) {
-    token[1] = textfile.get();
-    if (!textfile.good()) {
-      token[1] = (char)-1;
-    }
-    printf("%s: %d\n", token, (int) position);
-    leveldb::Status putting_status = ii->Put(writing_options, token, &position);
-    if (!textfile.good()) {
-      break;
-    }
-    token[0] = token[1];
-    ++position;
+  while (tokenizer.Tokenize(&token, )) {
+    leveldb::Status putting_status = indexdb->Put(writing_options, token, position);
   }
   delete ii;
   return EX_OK;
@@ -80,9 +105,9 @@ int main(int argc, char **argv) {
     abort_with_usage();
   } 
   if (strcmp("index", argv[1]) == 0) {
-    return create_ii(argv[2], argv[3]);
+    return add_index_to_db(argv[2], argv[3]);
   } else if (strcmp("search", argv[1]) == 0) {
-    return search_with_ii(argv[2], argv[3]);
+    return lookup_with_db(argv[2], argv[3]);
   } else {
     std::cerr << "Illegal command name" << std::endl;
     abort_with_usage();
